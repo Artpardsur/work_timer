@@ -1,19 +1,9 @@
 ﻿#!/usr/bin/env python
-\"\"\"
-Главный файл для запуска приложения
-\"\"\"
+"""
+Work Timer - Программа для напоминаний о здоровье
+"""
 
-import sys
-import os
-
-# Добавляем путь к src для импортов
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-def main():
-    \"\"\"Основная функция\"\"\"
-    print("🚀 Запуск work_timer")
-    print("=" * 30)
-    print("Проект в разработке...")
+from ui.console_ui import main
 
 if __name__ == "__main__":
     main()
