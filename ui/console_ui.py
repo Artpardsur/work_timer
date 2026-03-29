@@ -57,9 +57,17 @@ def show_settings(timer):
     print_header()
     print("⚙️ НАСТРОЙКИ")
     print("-" * 50)
-    print(f"  1. Интервал между перерывами: {timer.work_interval // 60} минут")
-    print(f"  2. Интервал между морганиями: {timer.blink_interval // 60} минут")
-    print(f"  3. Длительность перерыва: {timer.break_duration // 60} минут")
+    
+    # Показываем в минутах с одним знаком после запятой
+    work_min = timer.work_interval / 60
+    blink_min = timer.blink_interval / 60
+    break_min = timer.break_duration / 60
+    
+    print(f"  1. Интервал между перерывами: {work_min:.1f} минут")
+    print(f"  2. Интервал между морганиями: {blink_min:.1f} минут")
+    print(f"  3. Длительность перерыва: {break_min:.1f} минут")
+    print()
+    print("  💡 Для теста можно ввести дробные числа (например, 0.5 = 30 секунд)")
     print()
     print("  0. Назад")
     print()
@@ -67,21 +75,45 @@ def show_settings(timer):
     choice = input("Выберите настройку для изменения (0-3): ")
     
     if choice == "1":
-        new_val = int(input("Новый интервал (минут): "))
-        timer.work_interval = new_val * 60
-        print(f"✅ Интервал изменён на {new_val} минут")
+        try:
+            new_val = float(input("Новый интервал (минут, можно дробный): "))
+            if new_val <= 0:
+                print("❌ Интервал должен быть больше 0!")
+            else:
+                timer.work_interval = new_val * 60
+                print(f"✅ Интервал изменён на {new_val:.1f} минут ({timer.work_interval:.0f} секунд)")
+        except ValueError:
+            print("❌ Ошибка: нужно ввести число (например, 0.5 или 30)")
+    
     elif choice == "2":
-        new_val = int(input("Новый интервал моргания (минут): "))
-        timer.blink_interval = new_val * 60
-        print(f"✅ Интервал моргания изменён на {new_val} минут")
+        try:
+            new_val = float(input("Новый интервал моргания (минут, можно дробный): "))
+            if new_val <= 0:
+                print("❌ Интервал должен быть больше 0!")
+            else:
+                timer.blink_interval = new_val * 60
+                print(f"✅ Интервал моргания изменён на {new_val:.1f} минут ({timer.blink_interval:.0f} секунд)")
+        except ValueError:
+            print("❌ Ошибка: нужно ввести число (например, 0.5 или 10)")
+    
     elif choice == "3":
-        new_val = int(input("Новая длительность перерыва (минут): "))
-        timer.break_duration = new_val * 60
-        print(f"✅ Длительность перерыва изменена на {new_val} минут")
+        try:
+            new_val = float(input("Новая длительность перерыва (минут, можно дробный): "))
+            if new_val <= 0:
+                print("❌ Длительность должна быть больше 0!")
+            else:
+                timer.break_duration = new_val * 60
+                print(f"✅ Длительность перерыва изменена на {new_val:.1f} минут ({timer.break_duration:.0f} секунд)")
+        except ValueError:
+            print("❌ Ошибка: нужно ввести число (например, 0.5 или 5)")
+    
     elif choice == "0":
         return
     
-    time.sleep(1.5)
+    else:
+        print("❌ Неверный выбор!")
+    
+    time.sleep(2)
 
 
 def main():

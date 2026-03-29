@@ -160,14 +160,30 @@ class WorkTimer:
             return "🧘 На перерыве"
         else:
             return "▶️ Работает"
-    
+
     def get_stats(self):
         """Получить статистику"""
         stats_copy = self.stats.copy()
         
-        # Форматируем время работы
-        hours = stats_copy['total_work_seconds'] // 3600
-        minutes = (stats_copy['total_work_seconds'] % 3600) // 60
-        stats_copy['work_time'] = f"{hours}ч {minutes}м"
+        # Получаем текущее время работы
+        current_seconds = self.get_current_work_time()
+        
+        # Форматируем время
+        hours = current_seconds // 3600
+        minutes = (current_seconds % 3600) // 60
+        seconds = current_seconds % 60
+        stats_copy['work_time'] = f"{hours}ч {minutes}м {seconds}с"
+        stats_copy['work_seconds'] = current_seconds
         
         return stats_copy
+
+    def get_current_work_time(self):
+        """Получить текущее время работы (в секундах)"""
+        if not self.running or self.paused:
+            return self.stats['total_work_seconds']
+        
+        if self.start_time:
+            current_seconds = (datetime.now() - self.start_time).total_seconds()
+            return int(current_seconds - self.total_pause_seconds)
+        
+        return 0
