@@ -28,3 +28,6 @@ config.ini
 # Системные
 .DS_Store
 Thumbs.db
+
+*.exe
+*.ico
