@@ -1,0 +1,4 @@
+# build/ holds PyInstaller artifacts. GitHub mistakes the .toc files for TeX.
+# There are no real .tex files here: this is a pure Python project.
+build/** linguist-generated
+sounds/** linguist-vendored
