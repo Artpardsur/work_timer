@@ -1,4 +1,3 @@
-# build/ holds PyInstaller artifacts. GitHub mistakes the .toc files for TeX.
-# There are no real .tex files here: this is a pure Python project.
-build/** linguist-generated
+# Звуковые файлы — материалы, а не исходный код: GitHub не должен считать
+# их частью языковой статистики репозитория.
 sounds/** linguist-vendored

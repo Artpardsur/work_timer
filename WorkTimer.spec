@@ -5,7 +5,7 @@ a = Analysis(
     ['gui_app.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('sounds', 'sounds')],   # без этого в собранном exe нет звуков
     hiddenimports=['tkinter', '_tkinter'],
     hookspath=[],
     hooksconfig={},

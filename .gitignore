@@ -1,4 +1,4 @@
-﻿# Python
+# Python
 __pycache__/
 *.py[cod]
 *.so
@@ -6,28 +6,26 @@ __pycache__/
 env/
 venv/
 .venv/
+.pytest_cache/
+
+# Сборка PyInstaller — это результат, а не исходник
+build/
+dist/
+*.exe
+
+# Редакторы
 .idea/
 .vscode/
 
-# Базы данных
+# Данные и секреты
 *.db
 *.sqlite
 *.sqlite3
-
-# Логи и временные файлы
 *.log
-*.tmp
-temp/
-output/
-input/
-
-# Секреты
 .env
 config.ini
 
 # Системные
 .DS_Store
 Thumbs.db
-
-*.exe
-*.ico
+desktop.ini

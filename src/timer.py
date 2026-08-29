@@ -1,189 +1,205 @@
+"""Двигатель таймера: считает время и сообщает, когда пора моргнуть или встать.
+
+Здесь нет ни потоков, ни sleep, ни интерфейса. Всё состояние меняется в
+:meth:`WorkTimer.tick`, который вызывает интерфейс — консольный из своего цикла,
+оконный из ``root.after``. Благодаря этому таймер проверяется тестами с
+подставными часами: сорок минут работы прогоняются за миллисекунды.
 """
-Логика работы таймера
-"""
+
+from __future__ import annotations
 
 import time
-import threading
-from datetime import datetime
-from typing import Optional
+from dataclasses import dataclass, field
+from enum import Enum
+from typing import Callable, List
+
+# Ноутбук могли закрыть на час. Без ограничения после пробуждения посыпалась бы
+# сотня пропущенных напоминаний подряд.
+MAX_TICK_SECONDS = 60.0
 
 
-class WorkTimer:
-    """Класс для управления таймерами напоминаний"""
-    
-    def __init__(self, work_interval=30, blink_interval=10, break_duration=5):
-        """
-        Инициализация таймера
-        
-        Args:
-            work_interval: минут до перерыва (по умолч. 30)
-            blink_interval: минут до напоминания о моргании (по умолч. 10)
-            break_duration: минут длительность перерыва (по умолч. 5)
-        """
-        self.work_interval = work_interval * 60  # переводим в секунды
-        self.blink_interval = blink_interval * 60
-        self.break_duration = break_duration * 60
-        
-        # Состояние
-        self.running = False
-        self.paused = False
-        self.on_break = False
-        
-        # Потоки
-        self.work_thread = None
-        self.blink_thread = None
-        
-        # Статистика
-        self.stats = {
-            'breaks_taken': 0,
-            'blink_reminders': 0,
-            'pauses_count': 0,
-            'total_work_seconds': 0
+class Phase(str, Enum):
+    """Чем занят таймер прямо сейчас."""
+
+    IDLE = "idle"
+    WORK = "work"
+    BREAK = "break"
+
+
+class Event(str, Enum):
+    """О чём таймер сообщает интерфейсу."""
+
+    BLINK = "blink"              # пора моргнуть
+    BREAK_START = "break_start"  # пора встать и размяться
+    BREAK_END = "break_end"      # перерыв закончился
+
+
+@dataclass
+class Stats:
+    """Накопленные за сеанс числа."""
+
+    breaks_taken: int = 0
+    blink_reminders: int = 0
+    pauses_count: int = 0
+    worked_seconds: float = 0.0
+    rested_seconds: float = 0.0
+
+    def as_dict(self) -> dict:
+        return {
+            "breaks_taken": self.breaks_taken,
+            "blink_reminders": self.blink_reminders,
+            "pauses_count": self.pauses_count,
+            "worked_seconds": round(self.worked_seconds, 1),
+            "rested_seconds": round(self.rested_seconds, 1),
         }
-        
-        # Время
-        self.start_time = None
-        self.pause_start = None
-        self.total_pause_seconds = 0
-    
-    def start(self):
-        """Запустить таймер"""
-        if self.running and not self.paused:
-            return
-        
-        if not self.running:
-            self.running = True
-            self.start_time = datetime.now()
-            self.total_pause_seconds = 0
-            
-            # Запускаем потоки
-            self.work_thread = threading.Thread(target=self._work_loop, daemon=True)
-            self.blink_thread = threading.Thread(target=self._blink_loop, daemon=True)
-            self.work_thread.start()
-            self.blink_thread.start()
-        
-        elif self.paused:
-            self.paused = False
-            if self.pause_start:
-                self.total_pause_seconds += (datetime.now() - self.pause_start).total_seconds()
-    
-    def pause(self):
-        """Поставить на паузу"""
+
+
+@dataclass
+class WorkTimer:
+    """Чередование работы и перерывов с напоминаниями о моргании.
+
+    Аргументы задаются в минутах и могут быть дробными — 0.5 удобно для
+    проверки, не дожидаясь получаса.
+    """
+
+    work_minutes: float = 30.0
+    blink_minutes: float = 10.0
+    break_minutes: float = 5.0
+    clock: Callable[[], float] = time.monotonic
+
+    phase: Phase = field(default=Phase.IDLE, init=False)
+    paused: bool = field(default=False, init=False)
+    stats: Stats = field(default_factory=Stats, init=False)
+
+    _phase_elapsed: float = field(default=0.0, init=False)
+    _blink_elapsed: float = field(default=0.0, init=False)
+    _last_tick: float = field(default=0.0, init=False)
+
+    # --- управление -----------------------------------------------------
+
+    @property
+    def running(self) -> bool:
+        return self.phase is not Phase.IDLE
+
+    def start(self) -> None:
+        """Начать сеанс с чистого листа."""
+        self.phase = Phase.WORK
+        self.paused = False
+        self.stats = Stats()
+        self._phase_elapsed = 0.0
+        self._blink_elapsed = 0.0
+        self._last_tick = self.clock()
+
+    def pause(self) -> None:
         if self.running and not self.paused:
             self.paused = True
-            self.pause_start = datetime.now()
-            self.stats['pauses_count'] += 1
-    
-    def resume(self):
-        """Возобновить работу"""
+            self.stats.pauses_count += 1
+
+    def resume(self) -> None:
         if self.running and self.paused:
-            self.start()
-    
-    def stop(self):
-        """Остановить таймер"""
-        self.running = False
-        self.paused = False
-        self.on_break = False
-        
-        # Обновляем статистику
-        if self.start_time:
-            total_seconds = (datetime.now() - self.start_time).total_seconds()
-            self.stats['total_work_seconds'] = int(total_seconds - self.total_pause_seconds)
-    
-    def _work_loop(self):
-        """Основной цикл для напоминаний о перерывах"""
-        last_break = datetime.now()
-        
-        while self.running:
-            if not self.paused and not self.on_break:
-                elapsed = (datetime.now() - last_break).total_seconds()
-                
-                if elapsed >= self.work_interval:
-                    self._take_break()
-                    last_break = datetime.now()
-            
-            time.sleep(1)
-    
-    def _blink_loop(self):
-        """Цикл для напоминаний о моргании"""
-        last_blink = datetime.now()
-        
-        while self.running:
-            if not self.paused and not self.on_break:
-                elapsed = (datetime.now() - last_blink).total_seconds()
-                
-                if elapsed >= self.blink_interval:
-                    self._remind_blink()
-                    last_blink = datetime.now()
-            
-            time.sleep(1)
-    
-    def _take_break(self):
-        """Сделать перерыв"""
-        self.on_break = True
-        self.stats['breaks_taken'] += 1
-        
-        # Уведомление о начале перерыва
-        self._notify(
-            "🧘 ПЕРЕРЫВ!",
-            f"Встаньте и разомнитесь! {self.break_duration // 60} минут отдыха."
-        )
-        
-        # Ждём окончания перерыва
-        time.sleep(self.break_duration)
-        
-        self.on_break = False
-        self._notify("✅ ПЕРЕРЫВ ЗАКОНЧЕН!", "Возвращайтесь к работе!")
-    
-    def _remind_blink(self):
-        """Напомнить моргнуть"""
-        self.stats['blink_reminders'] += 1
-        self._notify("👁️ НАПОМИНАНИЕ!", "Не забывайте моргать! Это помогает глазам.")
-    
-    def _notify(self, title, message):
-        """Показать уведомление"""
-        print(f"\n{'='*50}")
-        print(f"🔔 {title}")
-        print(f"   {message}")
-        print(f"{'='*50}")
-        
-        # Звуковой сигнал (простейший)
-        print('\a')  # системный звук
-    
-    def get_status(self):
-        """Получить статус таймера"""
-        if not self.running:
-            return "⏹️ Остановлен"
-        elif self.paused:
-            return "⏸️ На паузе"
-        elif self.on_break:
-            return "🧘 На перерыве"
+            self.paused = False
+            # Время паузы не должно попасть в отработанное: сдвигаем точку
+            # отсчёта, иначе следующий tick засчитает всю паузу как работу.
+            self._last_tick = self.clock()
+
+    def toggle_pause(self) -> None:
+        if self.paused:
+            self.resume()
         else:
-            return "▶️ Работает"
+            self.pause()
 
-    def get_stats(self):
-        """Получить статистику"""
-        stats_copy = self.stats.copy()
-        
-        # Получаем текущее время работы
-        current_seconds = self.get_current_work_time()
-        
-        # Форматируем время
-        hours = current_seconds // 3600
-        minutes = (current_seconds % 3600) // 60
-        seconds = current_seconds % 60
-        stats_copy['work_time'] = f"{hours}ч {minutes}м {seconds}с"
-        stats_copy['work_seconds'] = current_seconds
-        
-        return stats_copy
+    def stop(self) -> None:
+        self.phase = Phase.IDLE
+        self.paused = False
+        self._phase_elapsed = 0.0
+        self._blink_elapsed = 0.0
 
-    def get_current_work_time(self):
-        """Получить текущее время работы (в секундах)"""
-        if not self.running or self.paused:
-            return self.stats['total_work_seconds']
-        
-        if self.start_time:
-            current_seconds = (datetime.now() - self.start_time).total_seconds()
-            return int(current_seconds - self.total_pause_seconds)
-        
-        return 0
+    def skip_break(self) -> None:
+        """Досрочно вернуться к работе."""
+        if self.phase is Phase.BREAK:
+            self._start_work()
+
+    # --- ход времени -----------------------------------------------------
+
+    def tick(self) -> List[Event]:
+        """Продвинуть таймер и вернуть накопившиеся события.
+
+        Вызывать как угодно часто: интервалы считаются по часам, а не по
+        числу вызовов, поэтому раз в секунду и раз в 100 мс дадут одно и то же.
+        """
+        now = self.clock()
+        delta = min(max(0.0, now - self._last_tick), MAX_TICK_SECONDS)
+        self._last_tick = now
+
+        if not self.running or self.paused or delta == 0.0:
+            return []
+
+        self._phase_elapsed += delta
+        events: List[Event] = []
+
+        if self.phase is Phase.WORK:
+            self.stats.worked_seconds += delta
+            self._blink_elapsed += delta
+
+            while self.blink_seconds > 0 and self._blink_elapsed >= self.blink_seconds:
+                self._blink_elapsed -= self.blink_seconds
+                self.stats.blink_reminders += 1
+                events.append(Event.BLINK)
+
+            if self._phase_elapsed >= self.work_seconds:
+                self.phase = Phase.BREAK
+                self._phase_elapsed = 0.0
+                self.stats.breaks_taken += 1
+                events.append(Event.BREAK_START)
+        else:
+            self.stats.rested_seconds += delta
+            if self._phase_elapsed >= self.break_seconds:
+                self._start_work()
+                events.append(Event.BREAK_END)
+
+        return events
+
+    def _start_work(self) -> None:
+        self.phase = Phase.WORK
+        self._phase_elapsed = 0.0
+        self._blink_elapsed = 0.0
+
+    # --- то, что показывает интерфейс -------------------------------------
+
+    @property
+    def work_seconds(self) -> float:
+        return self.work_minutes * 60
+
+    @property
+    def blink_seconds(self) -> float:
+        return self.blink_minutes * 60
+
+    @property
+    def break_seconds(self) -> float:
+        return self.break_minutes * 60
+
+    @property
+    def remaining(self) -> float:
+        """Сколько секунд осталось до конца текущей фазы."""
+        if not self.running:
+            return 0.0
+        total = self.work_seconds if self.phase is Phase.WORK else self.break_seconds
+        return max(0.0, total - self._phase_elapsed)
+
+    @property
+    def status(self) -> str:
+        if not self.running:
+            return "⏹ Остановлен"
+        if self.paused:
+            return "⏸ На паузе"
+        if self.phase is Phase.BREAK:
+            return "🧘 Перерыв"
+        return "▶ Работа"
+
+    def format_remaining(self) -> str:
+        seconds = int(self.remaining)
+        return f"{seconds // 60:02d}:{seconds % 60:02d}"
+
+    def format_worked(self) -> str:
+        seconds = int(self.stats.worked_seconds)
+        return f"{seconds // 3600}ч {(seconds % 3600) // 60:02d}м"
